@@ -38,7 +38,7 @@ def read_word_vecs(filename):
 def print_word_vecs(wordVectors, outFileName):
   sys.stderr.write('\nWriting down the vectors in '+outFileName+'\n')
   outFile = open(outFileName, 'w')  
-  for word, values in wordVectors.iteritems():
+  for word, values in wordVectors.iter():
     outFile.write(word+' ')
     for val in wordVectors[word]:
       outFile.write('%.4f' %(val)+' ')

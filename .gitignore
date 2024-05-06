@@ -1,3 +1,11 @@
+# Emacs backup files
+*~
+
+# venv files
+.venv/
+.env/
+.virtualenv/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

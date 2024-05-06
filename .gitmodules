@@ -1,0 +1,3 @@
+[submodule "catvar"]
+	path = catvar
+	url = git@github.com:nizarhabash1/catvar.git

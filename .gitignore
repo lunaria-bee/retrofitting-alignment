@@ -1,3 +1,7 @@
+# Output directories
+alignment/
+output/
+
 # Emacs backup files
 *~
 

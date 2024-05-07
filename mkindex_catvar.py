@@ -56,7 +56,9 @@ def search_morphs(morphs, forms=None, base=None, pattern=None, mode='&'):
     elif forms is not None:
         forms = set(forms)
 
-    results = []
+    if mode not in ('&', '|'):
+        raise ValueError(f"`mode` must be one of '&' or '|', not '{mode}'")
+
     test_function = (all if mode == '&' else any)
     return [
         morph for morph in morphs

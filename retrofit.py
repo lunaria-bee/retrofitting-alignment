@@ -196,6 +196,11 @@ if __name__=='__main__':
   parser.add_argument("-n", "--numiter", type=int, default=10, help="Num iterations")
   args = parser.parse_args()
 
+  if args.lexicon is None and args.transforms is None:
+    sys.stderr.write("Must supply one or both of -l/--lexicon or -t/--transforms.\n")
+    parser.print_usage(sys.stderr)
+    sys.exit()
+
   wordVecs = read_word_vecs(args.input)
   if args.lexicon:
     lexicon = read_lexicon(args.lexicon)
@@ -207,9 +212,6 @@ if __name__=='__main__':
     transforms = None
   numIter = int(args.numiter)
   outFileName = args.output
-
-  if lexicon is None and transforms is None:
-    raise ValueError("Must supply one or both of -l/--lexicon or -t/--transforms. See -h for help.")
 
   ''' Enrich the word vectors using ppdb and print the enriched vectors '''
   print_word_vecs(retrofit(wordVecs, numIter, lexicon, transforms), outFileName)

@@ -120,7 +120,12 @@ def compute_average_alignments(transforms, wordVecs):
 def retrofit(wordVecs, numIters, lexicon=None, transforms=None):
   newWordVecs = deepcopy(wordVecs)
   wvVocab = set(newWordVecs.keys())
-  loopVocab = wvVocab.intersection(set(lexicon.keys()))
+  retroDataVocab = set()
+  if lexicon:
+    retroDataVocab |= set(lexicon.keys())
+  if transforms:
+    retroDataVocab |= set(get_all_transform_forms(transforms))
+  loopVocab = wvVocab & retroDataVocab
   for it in range(numIters):
     if transforms:
         averageAlignments = compute_average_alignments(transforms, wordVecs)

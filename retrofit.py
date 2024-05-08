@@ -8,6 +8,8 @@ import sys
 
 from copy import deepcopy
 
+from morphdata import MorphPair
+
 isNumber = re.compile(r'\d+.*')
 def norm_word(word):
   if isNumber.search(word.lower()):
@@ -58,111 +60,89 @@ def read_lexicon(filename):
     lexicon[norm_word(words[0])] = [norm_word(word) for word in words[1:]]
   return lexicon
 
-def read_alignment(filename):
-  '''Read alignment data from file.
+def read_transforms(filename):
+  '''Read transform data from file.
 
   Return as dict of (pattern -> list of word form pairs).
 
   '''
-  with open(filename) as alignment_file:
-    alignment = json.load(alignment_file)
-
-  # Normalize word forms.
-  alignment = {
-    pattern: [
-      [norm_word(pair[0]), norm_word(pair[1])]
-      for pair in pairs
+  with open(filename) as transforms_file:
+    transforms = [
+      MorphPair(
+        norm_word(transform[0]),
+        norm_word(transform[1]),
+        transform[2],
+      )
+      for transform in json.load(transforms_file)
     ]
-    for pattern, pairs in alignment.items()
-  }
 
-  sys.stderr.write(f"Alignment read from: {filename} \n")
+  sys.stderr.write(f"Transforms read from: {filename} \n")
 
-  return alignment
+  return transforms
 
-def get_all_alignment_forms(alignment):
-  '''Get list of all word forms in alignment data.'''
-  return set(
-    form
-    for pattern, pairs in alignment.items()
-    for pair in pairs
-    for form in pair
-  )
+def get_all_transform_forms(transforms):
+  '''Get list of all word forms in transform data.'''
+  forms = set()
+  for transform in transforms:
+    forms.add(transform.pre)
+    forms.add(transform.post)
 
-def get_alignment_patterns_containing_form(alignment, form):
-  '''Get list of alignment patterns containing 'form' in at least one pair.
+  return forms
 
-  Excludes patterns for which all pairs containing the form map a word form to itself
-  (i.e. both pair elements are identical).
-
-  '''
-  return [
-    pattern for pattern, pairs in alignment.items()
-    if any(
-        form in pair
-        and pair[0] != pair[1]
-        for pair in pairs
-    )
-  ]
-
-def get_alignment_pattern_pairs_containing_form(alignment, pattern, form):
+def get_transforms_containing_form(transforms, form):
   '''TODO'''
   return [
-    pair for pair in alignment[pattern]
-    if form in pair
+    transform for transform in transforms
+    if form == transform.pre
+    or form == transform.post
   ]
 
 
-def compute_average_alignments(alignment, wordVecs):
+def compute_average_alignments(transforms, wordVecs):
+  sums = dict()
+  counts = dict()
+  for trans in transforms:
+    if trans.pre in wordVecs and trans.post in wordVecs:
+      if trans.pattern not in sums:
+        sums[trans.pattern] = wordVecs[trans.post] - wordVecs[trans.pre]
+        counts[trans.pattern] = 1
+      else:
+        sums[trans.pattern] += wordVecs[trans.post] - wordVecs[trans.pre]
+        counts[trans.pattern] += 1
+
   averages = dict()
-  for pattern, pairs in alignment.items():
-    # Filter pairs by those whose forms are both actually words we're learning embeddings
-    # for.
-    needed_pairs = [
-      pair for pair in pairs
-      if pair[0] in wordVecs and pair[1] in wordVecs
-    ]
-    # Calculate average difference between pairs.
-    if len(needed_pairs) > 0:
-      averages[pattern] = (
-        sum(wordVecs[pair[1]] - wordVecs[pair[0]] for pair in needed_pairs)
-        / len(needed_pairs)
-      )
+  for pattern in sums.keys():
+    averages[pattern] = sums[pattern] / counts[pattern]
 
   return averages
 
 ''' Retrofit word vectors to a lexicon '''
-def retrofit(wordVecs, lexicon, alignment, numIters):
+def retrofit(wordVecs, lexicon, transforms, numIters):
   newWordVecs = deepcopy(wordVecs)
   wvVocab = set(newWordVecs.keys())
   loopVocab = wvVocab.intersection(set(lexicon.keys()))
   for it in range(numIters):
-    averageAlignments = compute_average_alignments(alignment, wordVecs)
+    averageAlignments = compute_average_alignments(transforms, wordVecs)
     # loop through every node also in ontology (else just use data estimate)
     for word in loopVocab:
       wordNeighbours = set(lexicon[word]).intersection(wvVocab)
       numNeighbours = len(wordNeighbours)
 
-      wordPatterns = get_alignment_patterns_containing_form(alignment, word)
-      wordPatternPairs = {
-        pattern: [
-          pair for pair in alignment[pattern]
-          if (
-              word in pair
-              and pair[0] in loopVocab
-              and pair[1] in loopVocab
-          )
-        ]
-        for pattern in wordPatterns
-      }
-      numPairs = sum(len(pairs) for pairs in wordPatternPairs.values())
+      wordTransforms = get_transforms_containing_form(transforms, word)
+      # filter pairs with OOV members
+      wordTransforms = [
+        transform for transform in wordTransforms
+        if transform.pre in loopVocab
+        and transform.post in loopVocab
+      ]
+      numTransforms = len(wordTransforms)
 
       #no neighbours, pass - use data estimate
-      if numNeighbours == 0 and numPairs == 0:
+      if numNeighbours == 0 and numTransforms == 0:
         continue
 
       # the weight of the data estimate if the number of neighbours
-      newVec = (numNeighbours + numPairs) * wordVecs[word]
+      newVec = (numNeighbours + numTransforms) * wordVecs[word]
 
       # loop over neighbours and add to new vector (currently with weight 1)
       for ppWord in wordNeighbours:
@@ -170,20 +150,24 @@ def retrofit(wordVecs, lexicon, alignment, numIters):
 
       # loop over patterns and add what the vector *would* be if that pattern was the only
       # thing determining it's values
-      for pattern, pairs in wordPatternPairs.items():
-        for base, morph in pairs:
-          # If the current word is the base form of the pair, we want to target the vector
-          # obtained by going backwards from the morph to its expected base.
-          if word == base:
-            target = newWordVecs[morph] - averageAlignments[pattern]
-          # If the current word is the morph form of the pair, we want to target the
-          # vector obtained by going forwards from the base to its expected morph.
-          elif word == morph:
-            target = newWordVecs[base] + averageAlignments[pattern]
+      for transform in wordTransforms:
+        # If the current word is the pre-transformation member of the pair, we want to
+        # target the vector obtained by going backwards from the post-transformation form
+        # to the pre-transformation form.
+        if word == transform.pre:
+          target = newWordVecs[transform.post] - averageAlignments[transform.pattern]
+        # If the current word is the post-transformation member of the pair, we want to
+        # target the vector obtained by going forwards from the pre-transformation form to
+        # the post-transformation form.
+        elif word == transform.post:
+          target = newWordVecs[transform.pre] + averageAlignments[transform.pattern]
+        # Otherwise, something has gone wrong!
+        else:
+          raise ValueError(f"'{word}' not in transform pair {transform}")
 
-          newVec += target
+        newVec += target
 
-      newWordVecs[word] = newVec/(2*numNeighbours + 2*numPairs)
+      newWordVecs[word] = newVec/(2*numNeighbours + 2*numTransforms)
 
   return newWordVecs
 
@@ -192,16 +176,16 @@ if __name__=='__main__':
   parser = argparse.ArgumentParser()
   parser.add_argument("-i", "--input", type=str, default=None, help="Input word vecs")
   parser.add_argument("-l", "--lexicon", type=str, default=None, help="Lexicon file name")
-  parser.add_argument("-a", "--alignment", type=str, default=None, help="Alignment index file name")
+  parser.add_argument("-t", "--transforms", type=str, default=None, help="Morphological transforms index file name")
   parser.add_argument("-o", "--output", type=str, help="Output word vecs")
   parser.add_argument("-n", "--numiter", type=int, default=10, help="Num iterations")
   args = parser.parse_args()
 
   wordVecs = read_word_vecs(args.input)
   lexicon = read_lexicon(args.lexicon)
-  alignment = read_alignment(args.alignment)
+  transforms = read_transforms(args.transforms)
   numIter = int(args.numiter)
   outFileName = args.output
 
   ''' Enrich the word vectors using ppdb and print the enriched vectors '''
-  print_word_vecs(retrofit(wordVecs, lexicon, alignment, numIter), outFileName)
+  print_word_vecs(retrofit(wordVecs, lexicon, transforms, numIter), outFileName)

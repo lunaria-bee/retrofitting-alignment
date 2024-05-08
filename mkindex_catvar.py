@@ -7,6 +7,9 @@ import json
 from pathlib import Path
 import sys
 
+from morphdata import MorphPair
+from morphdata import MorphRelation
+
 
 CATVAR_MORPH_PATH = Path('./catvar/English-Morph.txt')
 OUTPUT_PATH = Path('./alignment/catvar.json')
@@ -23,9 +26,6 @@ parser.add_argument(
     default=OUTPUT_PATH,
     help="Path to output file. Will be created or overwritten.",
 )
-
-
-MorphRelation = namedtuple('MorphRelation', ('forms', 'base', 'pattern'))
 
 
 def get_morphs(path=CATVAR_MORPH_PATH):
@@ -71,29 +71,23 @@ def search_morphs(morphs, forms=None, base=None, pattern=None, mode='&'):
 
 
 def build_index(morphs):
-    index = dict()
-    for morph in morphs:
-        if morph.pattern not in index:
-            index[morph.pattern] = set()
-            index['r' + morph.pattern] = set()
+    index = set()
+    for relation in morphs:
+        for form in relation.forms:
+            index.add(MorphPair(form, relation.base, relation.pattern))
+            index.add(MorphPair(relation.base, form, 'r' + relation.pattern))
 
-        for form in morph.forms:
-            index[morph.pattern].add((morph.base, form))
-            index['r' + morph.pattern].add((form, morph.base))
-
-    index = {key: list(value) for key, value in index.items()}
-
-    return index
+    return list(index)
 
 
 def main(argv):
     args = parser.parse_args(argv)
 
     morphs = get_morphs()
-    alignment_index = build_index(morphs)
+    index = build_index(morphs)
     args.output_path.parent.mkdir(exist_ok=True)
     with open(args.output_path, 'w') as output_file:
-        json.dump(alignment_index, output_file)
+        json.dump(index, output_file)
 
 
 if __name__ == '__main__': main(sys.argv[1:])

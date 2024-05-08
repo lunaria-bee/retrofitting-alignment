@@ -117,57 +117,72 @@ def compute_average_alignments(transforms, wordVecs):
   return averages
 
 ''' Retrofit word vectors to a lexicon '''
-def retrofit(wordVecs, lexicon, transforms, numIters):
+def retrofit(wordVecs, numIters, lexicon=None, transforms=None):
   newWordVecs = deepcopy(wordVecs)
   wvVocab = set(newWordVecs.keys())
   loopVocab = wvVocab.intersection(set(lexicon.keys()))
   for it in range(numIters):
-    averageAlignments = compute_average_alignments(transforms, wordVecs)
+    if transforms:
+        averageAlignments = compute_average_alignments(transforms, wordVecs)
+
     # loop through every node also in ontology (else just use data estimate)
     for word in loopVocab:
-      wordNeighbours = set(lexicon[word]).intersection(wvVocab)
-      numNeighbours = len(wordNeighbours)
+      if lexicon:
+        wordNeighbours = set(lexicon[word]).intersection(wvVocab)
+        numNeighbours = len(wordNeighbours)
 
-      wordTransforms = get_transforms_containing_form(transforms, word)
-      # filter pairs with OOV members
-      wordTransforms = [
-        transform for transform in wordTransforms
-        if transform.pre in loopVocab
-        and transform.post in loopVocab
-      ]
-      numTransforms = len(wordTransforms)
+      if transforms:
+        wordTransforms = get_transforms_containing_form(transforms, word)
+        # filter pairs with OOV members
+        wordTransforms = [
+          transform for transform in wordTransforms
+          if transform.pre in loopVocab
+          and transform.post in loopVocab
+        ]
+        numTransforms = len(wordTransforms)
 
       #no neighbours, pass - use data estimate
-      if numNeighbours == 0 and numTransforms == 0:
+      if (
+          lexicon and numNeighbours == 0 and transforms and numTransforms == 0
+          or lexicon and numNeighbours == 0
+          or transforms and numTransforms == 0
+      ):
         continue
 
       # the weight of the data estimate if the number of neighbours
-      newVec = (numNeighbours + numTransforms) * wordVecs[word]
+      weight = 0
+      if lexicon:
+        weight += numNeighbours
+      if transforms:
+        weight += numTransforms
+      newVec = weight * wordVecs[word]
 
-      # loop over neighbours and add to new vector (currently with weight 1)
-      for ppWord in wordNeighbours:
-        newVec += newWordVecs[ppWord]
+      if lexicon:
+        # loop over neighbours and add to new vector (currently with weight 1)
+        for ppWord in wordNeighbours:
+          newVec += newWordVecs[ppWord]
 
-      # loop over patterns and add what the vector *would* be if that pattern was the only
-      # thing determining it's values
-      for transform in wordTransforms:
-        # If the current word is the pre-transformation member of the pair, we want to
-        # target the vector obtained by going backwards from the post-transformation form
-        # to the pre-transformation form.
-        if word == transform.pre:
-          target = newWordVecs[transform.post] - averageAlignments[transform.pattern]
-        # If the current word is the post-transformation member of the pair, we want to
-        # target the vector obtained by going forwards from the pre-transformation form to
-        # the post-transformation form.
-        elif word == transform.post:
-          target = newWordVecs[transform.pre] + averageAlignments[transform.pattern]
-        # Otherwise, something has gone wrong!
-        else:
-          raise ValueError(f"'{word}' not in transform pair {transform}")
+      if transforms:
+        # loop over patterns and add what the vector *would* be if that pattern was the only
+        # thing determining it's values
+        for transform in wordTransforms:
+          # If the current word is the pre-transformation member of the pair, we want to
+          # target the vector obtained by going backwards from the post-transformation form
+          # to the pre-transformation form.
+          if word == transform.pre:
+            target = newWordVecs[transform.post] - averageAlignments[transform.pattern]
+          # If the current word is the post-transformation member of the pair, we want to
+          # target the vector obtained by going forwards from the pre-transformation form to
+          # the post-transformation form.
+          elif word == transform.post:
+            target = newWordVecs[transform.pre] + averageAlignments[transform.pattern]
+          # Otherwise, something has gone wrong!
+          else:
+            raise ValueError(f"'{word}' not in transform pair {transform}")
 
-        newVec += target
+          newVec += target
 
-      newWordVecs[word] = newVec/(2*numNeighbours + 2*numTransforms)
+      newWordVecs[word] = newVec/(2*weight)
 
   return newWordVecs
 
@@ -182,10 +197,19 @@ if __name__=='__main__':
   args = parser.parse_args()
 
   wordVecs = read_word_vecs(args.input)
-  lexicon = read_lexicon(args.lexicon)
-  transforms = read_transforms(args.transforms)
+  if args.lexicon:
+    lexicon = read_lexicon(args.lexicon)
+  else:
+    lexicon = None
+  if args.transforms:
+    transforms = read_transforms(args.transforms)
+  else:
+    transforms = None
   numIter = int(args.numiter)
   outFileName = args.output
 
+  if lexicon is None and transforms is None:
+    raise ValueError("Must supply one or both of -l/--lexicon or -t/--transforms. See -h for help.")
+
   ''' Enrich the word vectors using ppdb and print the enriched vectors '''
-  print_word_vecs(retrofit(wordVecs, lexicon, transforms, numIter), outFileName)
+  print_word_vecs(retrofit(wordVecs, numIter, lexicon, transforms), outFileName)

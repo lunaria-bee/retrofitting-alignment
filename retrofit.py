@@ -127,6 +127,8 @@ def retrofit(wordVecs, numIters, lexicon=None, transforms=None):
     retroDataVocab |= set(get_all_transform_forms(transforms))
   loopVocab = wvVocab & retroDataVocab
   for it in range(numIters):
+    sys.stderr.write(f"Iteration {it+1}\n")
+
     if transforms:
         averageAlignments = compute_average_alignments(transforms, wordVecs)
 

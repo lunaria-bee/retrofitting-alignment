@@ -127,14 +127,19 @@ def retrofit(wordVecs, numIters, lexicon=None, transforms=None):
     retroDataVocab |= set(get_all_transform_forms(transforms))
   loopVocab = wvVocab & retroDataVocab
   for it in range(numIters):
+    sys.stderr.write(f"Iteration {it+1}\n")
+
     if transforms:
         averageAlignments = compute_average_alignments(transforms, wordVecs)
 
     # loop through every node also in ontology (else just use data estimate)
     for word in loopVocab:
-      if lexicon:
+      if lexicon and word in lexicon:
         wordNeighbours = set(lexicon[word]).intersection(wvVocab)
         numNeighbours = len(wordNeighbours)
+      else:
+        wordNeighbours = []
+        numNeighbours = 0
 
       if transforms:
         wordTransforms = get_transforms_containing_form(transforms, word)
